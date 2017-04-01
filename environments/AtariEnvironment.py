@@ -2,6 +2,7 @@ from BaseEnvironment import BaseEnvironment
 from PIL import Image
 
 import gym
+import numpy as np
 
 class AtariEnvironment(BaseEnvironment):
     """Wrapper class for the OpenAI Gym Atari Environment."""
@@ -61,4 +62,4 @@ class AtariEnvironment(BaseEnvironment):
         luminance_channel = rgb_img.convert('CMYK').split()[2].resize(
                                 (self.width, self.height),
                                 Image.ANTIALIAS)
-        return luminance_channel
+        return np.array(luminance_channel)

@@ -15,8 +15,10 @@ class AtariEnvironment(BaseEnvironment):
         if (type(self.possible_actions) != type(gym.spaces.discrete.Discrete(0))):
             raise AssertionError("The sample action space does not consist of Discrete actions.")
         self.previous_observation = None
-        self.recent_observation = self.__preprocess_observation__(self.environment.reset())
+        self.recent_observation = None
+        self.__reset__()
         self.should_render = render
+        self.done = False
         if self.should_render:
             self.environment.render()
 
@@ -35,15 +37,21 @@ class AtariEnvironment(BaseEnvironment):
         return self.recent_action
 
     def performAction(self, **kwargs):
+        if self.done:
+            self.__reset__()
         self.recent_action = kwargs.get('action')
         observation, reward, done, _ = self.environment.step(self.recent_action)
+        if done:
+            self.done = done
         self.previous_observation = self.recent_observation
         self.recent_observation = self.__preprocess_observation__(observation)
         self.recent_reward = reward
-        self.is_done = done
         if self.should_render:
             self.environment.render()
         return True
+
+    def isTerminalState(self, **kwargs):
+        return self.done
 
     def getPossibleActions(self, **kwargs):
         return self.possible_actions.n
@@ -63,3 +71,7 @@ class AtariEnvironment(BaseEnvironment):
                                 (self.width, self.height),
                                 Image.ANTIALIAS)
         return np.array(luminance_channel)
+
+    def __reset__(self):
+        self.recent_observation = self.__preprocess_observation__(self.environment.reset())
+        self.done = False

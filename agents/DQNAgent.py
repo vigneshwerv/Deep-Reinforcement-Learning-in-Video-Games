@@ -116,6 +116,7 @@ class DQNAgent(BaseAgent):
                           self.pconv_w3_assign, self.pconv_b3_assign,
                           self.pfc_w_1_assign, self.pfc_b_1_assign,
                           self.pout_w_2_assign, self.pout_b_2_assign])
+        return
 
     def predict(self, minibatch):
         return self.session.run(self.poutput, feed_dict={self.x: minibatch})

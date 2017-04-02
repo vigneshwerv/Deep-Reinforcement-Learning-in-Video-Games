@@ -1,4 +1,7 @@
-from environments import AtariEnvironment.AtariEnvironment as AtariEnvironment
+from agents.DQNAgent import DQNAgent
+from collections import deque
+from environments.AtariEnvironment import AtariEnvironment
+from ExperienceReplay import ExperienceReplay
 
 import numpy as np
 import random
@@ -6,20 +9,38 @@ import random
 class DQNController(object):
 
     def __init__(self, **kwargs):
+        # Number of steps of training before training network's weights are
+        # copied to target network (C)
         self.copy_steps = 10
+        # Number of frames to be stacked for a state representation (m)
         self.stack_num = 4
+        # Number of times actions are to be repeated (k)
         self.repeat_action = 4
+        # Size of minibatch
         self.minibatch_size = 32
+        # Lower than this, epsilon is kept constant
         self.min_epsilon = 0.1
+        # Epsilon's starting value
         self.epsilon = 1.0
+        # Number of steps to anneal epsilon
         self.anneal_till = 100000
+        # Discount factor
+        self.discount = 0.99
+        # Variable that holds the current Environment
         self.environment = AtariEnvironment()
+        self.action_space = self.environment.getPossibleActions()
+        # For how long should the network observe before playing?
         self.observation_time_steps = 500
-        self.training_network = DQNAgent()
-        self.playing_network = DQNAgent()
-        self.current_state = [self.environment.getObservation()]
+        # The network
+        self.network = DQNAgent(self.action_space)
+        # The current state of the environment (stacked)
+        self.current_state = deque(maxlen=self.stack_num)
+        self.current_state.append(self.environment.getObservation())
+        # Experience replay
+        self.memory_limit = 50000
+        self.experience_replay = ExperienceReplay(self.memory_limit)
 
-    def __anneal_epsilon__():
+    def __anneal_epsilon__(self):
         self.epsilon = max(((self.epsilon - self.min_epsilon) / self.anneal_till),
                            self.min_epsilon)
         return
@@ -34,35 +55,41 @@ class DQNController(object):
         self.__anneal_epsilon__()
         return action
 
-    def __supply_action_to_environment__(self, action, action_q_value):
+    def __supply_action_to_environment__(self, action):
         # Get action using epsilon-greedy strategy
         action = self.__sample_epsilon_action__(action)
         for i in xrange(self.repeat_action):
-            self.environment.performAction(action)
-        # Add current state, action, reward, consequent state to experience replay
-        next_state = self.current_state[1:]
-        next_state.append(self.environment.getObservation())
-        # TODO: Write this line when experience replay is done
-        # ExperienceReplay.add(current_state,
-        #                       action,
-        #                       self.environment.getReward(),
-        #                       next_state,
-        #                       self.environment.isTerminalState())
+            self.environment.performAction(action=action)
+            # Add current state, action, reward, consequent state to experience replay
+            next_state = deque(self.current_state, maxlen=self.stack_num)
+            next_state.append(self.environment.getObservation())
+            self.experience_replay.add((np.stack(self.current_state, axis=2),
+                                  action,
+                                  self.environment.getReward(),
+                                  next_state,
+                                  self.environment.isTerminalState()))
+        self.current_state = deque(self.current_state, maxlen=self.stack_num)
+        self.current_state.append(self.environment.getObservation())
         return
 
-    def __compute_loss__(self, q_values, target_q_values):
+    def __compute_loss__(self, minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals):
         # Compute a y_j (Refer to Algorithm 1) tensor to be supplied to the training_network
-        for i in xrange(len(self.minibatch_terminal)):
-            if self.minibatch_terminal[i]:
+        loss_tensor = []
+        actions = []
+        for i in xrange(len(minibatch_terminals)):
+            temp_actions = [0] * self.action_space
+            temp_actions[minibatch_action[i]] = 1
+            actions.append(temp_actions)
+            if minibatch_terminals[i]:
                 # If it is the terminal episode, just use the reward
-                loss_tensor.append(self.minibatch_reward[i])
+                loss_tensor.append(minibatch_reward[i])
             else:
                 # Otherwise, use reward + discount * max_q_value
-                loss_tensor.append(self.minibatch_reward[i]
+                loss_tensor.append(minibatch_reward[i]
                                    + (self.discount * max(target_q_values[i])))
-        loss_tensor = (loss_tensor - self.q_values) ** 2
-        # TODO: Write code for this when the training network is ready
+        # print np.array(actions).shape
         # Call network's gradient descent step
+        return self.network.train(minibatch_states, loss_tensor, np.array(actions, dtype=np.float32))
 
     def run(self):
         """This method will be called from the main() method."""
@@ -70,7 +97,7 @@ class DQNController(object):
         # them on the environment
         while len(self.current_state) != self.stack_num:
             random_action = self.environment.sampleRandomAction()
-            self.environment.performAction(random_action)
+            self.environment.performAction(action=random_action)
             self.current_state.append(self.environment.getObservation())
 
         t = 0
@@ -78,23 +105,31 @@ class DQNController(object):
         while True:
             # Use the current state of the emulator and predict an action which gets
             # added to replay memory (use playing_network)
-            q_values = self.playing_network.predict(current_state)
+            q_values = self.network.predict([np.stack(self.current_state, axis=2)])
             action_to_perform = np.argmax(q_values, axis=1)
             # Perform action based on epsilon-greedy search and store the transitions
             # in experience replay
-            self.__supply_action_to_environment__(action_to_perform, q_values[action_to_perform])
+            self.__supply_action_to_environment__(action_to_perform[0])
             # If in the observation phase, do not train the network just yet
             t += 1
             if t < self.observation_time_steps:
                 continue
+            # print "Started training"
             # Sample minibatch of size self.minibatch_size from experience replay
-            # TODO: Write this line when experience replay is done
-            # This minibatch should have states, actions, rewards, nextStates,
-            # and whether nextState was final or not
-            q_values = self.training_network.predict(minibatch_states)
-            target_q_values = self.playing_network.predict(minibatch_next_states)
-            self.__compute_loss__(q_values, target_q_values)
+            minibatch = self.experience_replay.sample(32)
+            minibatch_states, minibatch_action, minibatch_reward, minibatch_next_states, \
+                    minibatch_terminals = \
+                    minibatch[:,0] , minibatch[:,1], minibatch[:,2], minibatch[:,3], minibatch[:,4]
+            # print "States minibatch: ", minibatch_states[0][0].shape
+            minibatch_states = np.stack([minibatch[i,0] for i in xrange(32)], axis=0)
+            #import code
+            #code.interact(local=locals())
+            target_q_values = self.network.predict(minibatch_states)
+            cost = self.__compute_loss__(
+                    minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals)
+            if t % 100 == 0:
+                print "Cost at iteration", t, " is", cost
             if C % self.copy_steps == 0:
                 # Copy weights from training network to playing network
-                # TODO: Code for this needs to be written; handled by network
+                self.network.copy_weights()
             C += 1

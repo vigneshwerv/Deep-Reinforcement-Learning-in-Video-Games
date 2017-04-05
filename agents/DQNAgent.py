@@ -1,20 +1,29 @@
 from BaseAgent import BaseAgent
 
+import numpy as np
 import tensorflow as tf
 
 class DQNAgent(BaseAgent):
 
-    def __init__(self, num_actions):
+    def __init__(self, num_actions, discount_factor):
         self.learning_rate = 0.00025
         self.gradient_momentum = 0.95
         self.sq_gradient_momentum = 0.95
         self.min_sq_gradient = 0.01
-        self.num_actions = num_actions
+        self.num_actions = int(num_actions)
+
         self.x = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
-        self.action = tf.placeholder(tf.float32, shape=[None, self.num_actions])
-        self.y = tf.placeholder(tf.float32, shape=[None])
+        self.normalized_x = self.x / 255.0
+
+        self.action = tf.placeholder(tf.int32, shape=[None])
+        self.terminal_bool = tf.placeholder(tf.bool, shape=[None])
+        self.reward = tf.placeholder(tf.float32, shape=[None])
+        self.discount = tf.constant(discount_factor)
+        self.playing_network_q_values = tf.placeholder(tf.float32, shape=[None, num_actions])
+
         self.__create_training_network__()
         self.__create_playing_network__()
+
         self.session = tf.Session()
         initialize_variables = tf.global_variables_initializer()
         self.session.run(initialize_variables)
@@ -38,7 +47,7 @@ class DQNAgent(BaseAgent):
         self.pconv_w_1 = self.__create_weights__([8, 8, 4, 32])
         self.pconv_b_1 = self.__create_biases__([32])
         self.pconv_1 = tf.nn.relu(
-                self.__conv2d__(self.x, self.pconv_w_1, 4) + self.pconv_b_1)
+                self.__conv2d__(self.normalized_x, self.pconv_w_1, 4) + self.pconv_b_1)
 
         self.pconv_w_2 = self.__create_weights__([4, 4, 32, 64])
         self.pconv_b_2 = self.__create_biases__([64])
@@ -84,7 +93,7 @@ class DQNAgent(BaseAgent):
         self.tconv_w_1 = self.__create_weights__([8, 8, 4, 32])
         self.tconv_b_1 = self.__create_biases__([32])
         self.tconv_1 = tf.nn.relu(
-                self.__conv2d__(self.x, self.tconv_w_1, 4) + self.tconv_b_1)
+                self.__conv2d__(self.normalized_x, self.tconv_w_1, 4) + self.tconv_b_1)
 
         self.tconv_w_2 = self.__create_weights__([4, 4, 32, 64])
         self.tconv_b_2 = self.__create_biases__([64])
@@ -106,8 +115,16 @@ class DQNAgent(BaseAgent):
         self.tout_b_2 = self.__create_biases__([self.num_actions])
         self.toutput = tf.matmul(self.tfc_1, self.tout_w_2) + self.tout_b_2
 
-        self.readout = tf.reduce_sum(tf.multiply(self.toutput, self.action), reduction_indices=1)
-        self.cost = tf.reduce_mean(tf.square(self.y - self.readout))
+        self.terminal = tf.cast(self.terminal_bool, tf.float32)
+
+        self.target_q_values = tf.multiply(tf.reduce_max(self.playing_network_q_values, axis=1), self.discount)
+        self.target_q_values_with_terminal = tf.multiply(self.target_q_values, self.terminal)
+        self.y_t = tf.add(self.target_q_values_with_terminal, self.reward)
+
+        self.action_one_hot = tf.one_hot(self.action, self.num_actions)
+        self.q_values = tf.reduce_sum(tf.multiply(self.toutput, self.action_one_hot), reduction_indices=1)
+
+        self.cost = tf.square(self.y_t - self.q_values)
         self.train_step = tf.train.AdamOptimizer(1e-6).minimize(self.cost)
 
     def copy_weights(self):
@@ -119,12 +136,20 @@ class DQNAgent(BaseAgent):
         return
 
     def predict(self, minibatch):
+        if len(minibatch.shape) == 4:
+            minibatch = np.transpose(minibatch, (0, 2, 3, 1))
+        else:
+            minibatch = np.transpose(minibatch, (1, 2, 0))
+            minibatch = [minibatch]
         return self.session.run(self.poutput, feed_dict={self.x: minibatch})
 
-    def train(self, x_values, y_values, actions):
+    def train(self, x_values, target_q_values, actions, rewards, terminals):
+        x_values = np.transpose(x_values, (0, 2, 3, 1))
         cost, _ = self.session.run([self.cost, self.train_step], feed_dict={
                                                 self.x: x_values,
-                                                self.y: y_values,
-                                                self.action: actions
+                                                self.playing_network_q_values: target_q_values,
+                                                self.action: actions,
+                                                self.reward: rewards,
+                                                self.terminal_bool: terminals
                                                })
         return cost

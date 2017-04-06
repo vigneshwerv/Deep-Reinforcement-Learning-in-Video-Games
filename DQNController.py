@@ -38,7 +38,6 @@ class DQNController(object):
         self.observation_time_steps = 50000
         # The network
         self.network = DQNAgent(self.action_space, self.discount)
-        self.network.copy_weights()
         self.train_frequency = 4
         # The current state of the environment (stacked)
         self.current_state = deque(maxlen=self.stack_num)
@@ -80,7 +79,13 @@ class DQNController(object):
 
     def __compute_loss__(self, minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals):
         # Call network's gradient descent step
-        return self.network.train(minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals)
+        max_index = np.argmax(target_q_values, axis=1)
+        pre_q = self.network.train_predict(minibatch_states)
+        terminal = minibatch_terminals.astype(int)
+        for i in xrange(len(minibatch_action)):
+            pre_q[i, minibatch_action[i]] = minibatch_reward[i] + \
+                                            (self.discount * target_q_values[i, max_index[i]]) * terminal[i]
+        return self.network.train(minibatch_states, pre_q)
 
     def __add_to_current_state__(self, state):
         self.current_state[:-1] = self.current_state[1:]
@@ -140,7 +145,7 @@ class DQNController(object):
                 if j % self.copy_steps == 0:
                     logger.info("Copying network weights. Elapsed time since start=%.2f",
                             (time.time() - time_now))
-                    self.network.copy_weights()
+                    self.network.copy_weights(i, j)
             total_score, num_games = self.environment.getStatistics()
             time_taken = (time.time() - time_now)
             logger.info("Finished epoch %d: Steps=%d; Time taken=%.2f",

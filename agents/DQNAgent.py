@@ -1,26 +1,41 @@
 from BaseAgent import BaseAgent
 
+import math
 import numpy as np
 import tensorflow as tf
 
 class DQNAgent(BaseAgent):
 
     def __init__(self, num_actions, discount_factor):
+
         self.learning_rate = 0.00025
         self.gradient_momentum = 0.95
         self.sq_gradient_momentum = 0.95
         self.min_sq_gradient = 0.01
         self.num_actions = int(num_actions)
+        self.discount_factor = discount_factor
+
+        self.error_clip = 1.0
+        self.gradient_clip = 10
 
         self.session = tf.Session()
 
-        self.x = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
-        self.y = tf.placeholder(tf.float32, shape=[None, num_actions])
-        self.global_step = tf.Variable(0, trainable=False)
-        self.normalized_x = self.x / 255.0
+        self.screens = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
+        self.actions = tf.placeholder(tf.int32, shape=[None])
+        self.rewards = tf.placeholder(tf.float32, shape=[None])
+        self.terminals = tf.placeholder(tf.bool, shape=[None])
+        self.next_screens = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
 
-        self.__create_training_network__()
-        self.__create_playing_network__()
+        self.normalized_screens = self.screens / 255.0
+        self.normalized_next_screens = self.next_screens / 255.0
+
+        self.global_step = tf.Variable(0, trainable=False)
+
+        self.copy_ops = []
+        self.q_values, self.target_q_values = self._create_network_()
+
+        self.cost = self._create_error_gradient_ops_()
+        self.train = self._create_optimizer_op_()
 
         initialize_variables = tf.global_variables_initializer()
 
@@ -28,111 +43,166 @@ class DQNAgent(BaseAgent):
         self.train_write = tf.summary.FileWriter('log/train', self.session.graph)
 
         self.session.run(initialize_variables)
-        self.copy_weights(0, 0)
 
-    def __conv2d__(self, input_tensor, output_dimension, filter_size, stride, name='conv'):
-        initializer = tf.contrib.layers.xavier_initializer()
+    def _create_optimizer_op_(self):
+        with tf.name_scope('optimizer'):
+            optimizer = tf.train.RMSPropOptimizer(
+                            self.learning_rate,
+                            decay=self.gradient_momentum,
+                            momentum=0.0,
+                            epsilon=self.min_sq_gradient)
+
+            grads_and_vars = optimizer.compute_gradients(self.cost)
+            gradients = [gradient[0] for gradient in grads_and_vars]
+            params = [param[1] for param in grads_and_vars]
+
+            if self.gradient_clip > 0:
+                gradients = tf.clip_by_global_norm(gradients, self.gradient_clip)[0]
+            return optimizer.apply_gradients(zip(gradients, params))
+
+    def _create_error_gradient_ops_(self):
+        # Get the Q-value for the action taken
+        one_hot_actions = tf.one_hot(self.actions, self.num_actions)
+        predicted_q_values = tf.reduce_sum(
+                                tf.multiply(
+                                    self.q_values, one_hot_actions),
+                                reduction_indices=1)
+        # Get the target Q-values (used for error)
+        target_q_values = tf.reduce_max(self.target_q_values, reduction_indices=1)
+        discount_factor = tf.constant(self.discount_factor)
+        discount_q_values = tf.multiply(discount_factor, target_q_values)
+        terminal_q_removed = tf.multiply(
+                                tf.cast(self.terminals, tf.float32),
+                                discount_q_values)
+        target_value = tf.stop_gradient(self.rewards + terminal_q_removed)
+        # Calculate difference
+        difference = tf.abs(predicted_q_values - target_value)
+
+        if self.error_clip >= 0:
+            quadratic_part = tf.clip_by_value(difference, 0.0, self.error_clip)
+            linear_part = difference - quadratic_part
+            errors = (0.5 * tf.square(quadratic_part)) + (self.error_clip * linear_part)
+        else:
+            errors = (0.5 * tf.square(difference))
+
+        return tf.reduce_sum(errors)
+
+    def _get_weights_(self, shape, name):
+        fan_in = np.prod(shape[0:-1])
+        std = 1 / math.sqrt(fan_in)
+        return tf.Variable(tf.random_uniform(shape, minval=(-std), maxval=std),
+                           name=(name + '_weights'))
+    def _get_biases_(self, shape, name):
+        fan_in = np.prod(shape[0:-1])
+        std = 1 / math.sqrt(fan_in)
+        return tf.Variable(tf.random_uniform([shape[-1]], minval=(-std), maxval=std),
+                           name=(name + '_biases'))
+
+    def _create_conv_layer_(self,
+                            policy_input_tensor,
+                            target_input_tensor,
+                            output_dimension,
+                            filter_size,
+                            stride,
+                            name='conv'):
         stride = [1, stride[0], stride[1], 1]
-        filter_size = [filter_size[0], filter_size[1], input_tensor.get_shape()[-1], output_dimension]
+        filter_size = [filter_size[0], filter_size[1], policy_input_tensor.get_shape().as_list()[-1], output_dimension]
         with tf.variable_scope(name):
-            w = tf.get_variable('w', filter_size, tf.float32, initializer=initializer)
-            b = tf.get_variable('biases', [output_dimension], initializer=tf.constant_initializer(0.0))
-            conv = tf.nn.relu(tf.nn.conv2d(input_tensor, w, stride, padding='VALID') + b)
-            return w, b, conv
+            w = self._get_weights_(filter_size, ('policy_' + name))
+            b = self._get_biases_(filter_size, ('policy_' + name))
+            target_w = tf.Variable(w.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_weights'))
+            target_b = tf.Variable(b.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_biases'))
 
-    def __fc__(self, input_tensor, output_size, stddev=0.02, bias_start=0.0, name='fc'):
-        shape = input_tensor.get_shape().as_list()
+            self.copy_ops.append(tf.assign(target_w, w))
+            self.copy_ops.append(tf.assign(target_b, b))
+
+            policy_conv = tf.nn.relu(tf.nn.conv2d(policy_input_tensor, w, stride, padding='VALID') + b)
+            target_conv = tf.nn.relu(tf.nn.conv2d(target_input_tensor,
+                                                  target_w, stride,
+                                                  padding='VALID') + target_b)
+            return policy_conv, target_conv
+
+    def _create_fc_layer_(self,
+                          policy_input_tensor,
+                          target_input_tensor,
+                          output_size,
+                          name='fc'):
+        shape = policy_input_tensor.get_shape().as_list()
         with tf.variable_scope(name):
-            w = tf.get_variable('Matrix', [shape[1], output_size], tf.float32, tf.random_normal_initializer(stddev=stddev))
-            b = tf.get_variable('bias', [output_size], initializer=tf.constant_initializer(bias_start))
-            out = tf.nn.relu(tf.matmul(input_tensor, w) + b)
-            return w, b, out
+            w = self._get_weights_([shape[1], output_size], ('policy_' + name))
+            b = self._get_biases_([shape[1], output_size], ('policy_' + name))
+            target_w = tf.Variable(w.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_weights'))
+            target_b = tf.Variable(b.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_biases'))
 
-    def __create_playing_network__(self):
-        # Playing network variables
-        self.pconv_w_1, self.pconv_b_1, self.pconv_1 = \
-                self.__conv2d__(self.normalized_x, 32, [8, 8], [4, 4], name='p1')
+            self.copy_ops.append(tf.assign(target_w, w))
+            self.copy_ops.append(tf.assign(target_b, b))
 
-        self.pconv_w_2, self.pconv_b_2, self.pconv_2 = \
-                self.__conv2d__(self.pconv_1, 64, [4, 4], [2, 2], name='p2')
+            policy_out = tf.nn.relu(tf.matmul(policy_input_tensor, w) + b)
+            target_out = tf.nn.relu(tf.matmul(target_input_tensor, target_w) + target_b)
+            return policy_out, target_out
 
-        self.pconv_w_3, self.pconv_b_3, self.pconv_3 = \
-                self.__conv2d__(self.pconv_2, 64, [3, 3], [1, 1], name='p3')
+    def _create_linear_layer_(self,
+                             policy_input_tensor,
+                             target_input_tensor,
+                             output_size,
+                             name='fc'):
+        shape = policy_input_tensor.get_shape().as_list()
+        with tf.variable_scope(name):
+            w = self._get_weights_([shape[1], output_size], ('policy_' + name))
+            b = self._get_biases_([shape[1], output_size], ('policy_' + name))
+            target_w = tf.Variable(w.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_weights'))
+            target_b = tf.Variable(b.initialized_value(),
+                                   trainable=False,
+                                   name=('target_' + name + '_biases'))
 
-        shape = self.pconv_3.get_shape().as_list()
-        self.pconv_flat = tf.reshape(self.pconv_3, [-1, reduce(lambda x, y: x * y, shape[1:])])
+            self.copy_ops.append(tf.assign(target_w, w))
+            self.copy_ops.append(tf.assign(target_b, b))
 
-        self.pfc_w_1, self.pfc_b_1, self.pfc_1 = \
-                self.__fc__(self.pconv_flat, 512, name='p4')
+            policy_out = tf.matmul(policy_input_tensor, w) + b
+            target_out = tf.matmul(target_input_tensor, target_w) + target_b
+            return policy_out, target_out
 
-        self.pout_w_2, self.pout_b_2, self.poutput = \
-                self.__fc__(self.pfc_1, self.num_actions, name='p5')
+    def _create_network_(self):
+        policy_conv_1, target_conv_1 = self._create_conv_layer_(
+                        self.normalized_screens,
+                        self.normalized_next_screens,
+                        32, [8, 8], [4, 4], name='conv1')
+        policy_conv_2, target_conv_2 = self._create_conv_layer_(
+                        policy_conv_1,
+                        target_conv_1,
+                        64, [4, 4], [2, 2], name='conv2')
+        policy_conv_3, target_conv_3 = self._create_conv_layer_(
+                        policy_conv_2,
+                        target_conv_2,
+                        64, [3, 3], [1, 1], name='conv3')
 
-        self.__create_assignment_ops__()
+        shape = policy_conv_3.get_shape().as_list()
+        policy_conv_3_flat = tf.reshape(policy_conv_3, [-1, reduce(lambda x, y: x * y, shape[1:])])
+        target_conv_3_flat = tf.reshape(target_conv_3, [-1, reduce(lambda x, y: x * y, shape[1:])])
 
-    def __create_assignment_ops__(self):
-        # Creae graph ops for copying over weights to the playing network
-        self.pconv_w1_assign = tf.assign(self.pconv_w_1, self.tconv_w_1)
-        self.pconv_b1_assign = tf.assign(self.pconv_b_1, self.tconv_b_1)
+        policy_fc_1, target_fc_1 = self._create_fc_layer_(
+                        policy_conv_3_flat,
+                        target_conv_3_flat,
+                        512, name='fc1')
 
-        self.pconv_w2_assign = tf.assign(self.pconv_w_2, self.tconv_w_2)
-        self.pconv_b2_assign = tf.assign(self.pconv_b_2, self.tconv_b_2)
-
-        self.pconv_w3_assign = tf.assign(self.pconv_w_3, self.tconv_w_3)
-        self.pconv_b3_assign = tf.assign(self.pconv_b_3, self.tconv_b_3)
-
-        self.pfc_w_1_assign = tf.assign(self.pfc_w_1, self.tfc_w_1)
-        self.pfc_b_1_assign = tf.assign(self.pfc_b_1, self.tfc_b_1)
-
-        self.pout_w_2_assign = tf.assign(self.pout_w_2, self.tout_w_2)
-        self.pout_b_2_assign = tf.assign(self.pout_b_2, self.tout_b_2)
-
-    def __create_training_network__(self):
-        # Training network variables
-        self.tconv_w_1, self.tconv_b_1, self.tconv_1 = \
-                self.__conv2d__(self.normalized_x, 32, [8, 8], [4, 4], name='t1')
-
-        x_min = tf.reduce_min(self.tconv_w_1)
-        x_max = tf.reduce_max(self.tconv_w_1)
-        kernel_0_to_1 = (self.tconv_w_1 - x_min) / (x_max - x_min)
-        kernel_transposed = tf.transpose(kernel_0_to_1, [3, 0, 1, 2])
-        self.kernel_summary = tf.summary.image('conv1/filters', kernel_transposed, max_outputs=32)
-
-        self.tconv_w_2, self.tconv_b_2, self.tconv_2 = \
-                self.__conv2d__(self.tconv_1, 64, [4, 4], [2, 2], name='t2')
-
-        self.tconv_w_3, self.tconv_b_3, self.tconv_3 = \
-                self.__conv2d__(self.tconv_2, 64, [3, 3], [1, 1], name='t3')
-
-        shape = self.tconv_3.get_shape().as_list()
-        self.tconv_flat = tf.reshape(self.tconv_3, [-1, reduce(lambda x, y: x * y, shape[1:])])
-
-        self.tfc_w_1, self.tfc_b_1, self.tfc_1 = \
-                self.__fc__(self.tconv_flat, 512, name='t4')
-
-        self.tout_w_2, self.tout_b_2, self.toutput = \
-                self.__fc__(self.tfc_1, self.num_actions, name='t5')
-
-        learning_rate = tf.train.exponential_decay(self.learning_rate, self.global_step,
-                                                    100000, 0.96, staircase=True)
-
-        self.cost = tf.reduce_mean(
-                        tf.reduce_sum(
-                            tf.squared_difference(
-                                self.y, self.toutput), reduction_indices=1))
-        self.train_step = tf.train.RMSPropOptimizer(learning_rate,
-                                                    momentum=self.gradient_momentum,
-                                                    epsilon=self.min_sq_gradient)\
-                                .minimize(self.cost, global_step=self.global_step)
+        policy_out, target_out = self._create_linear_layer_(
+                        policy_fc_1,
+                        target_fc_1,
+                        self.num_actions, name='linear')
+        return policy_out, target_out
 
     def copy_weights(self, i, j):
-        self.session.run([self.pconv_w1_assign, self.pconv_b1_assign,
-                          self.pconv_w2_assign, self.pconv_b2_assign,
-                          self.pconv_w3_assign, self.pconv_b3_assign,
-                          self.pfc_w_1_assign, self.pfc_b_1_assign,
-                          self.pout_w_2_assign, self.pout_b_2_assign])
-        image_summary = self.session.run(self.kernel_summary)
-        # self.train_write.add_summary(image_summary, i*j)
+        self.session.run(self.copy_ops)
         return
 
     def predict(self, minibatch):

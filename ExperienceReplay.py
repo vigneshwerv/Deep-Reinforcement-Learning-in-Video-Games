@@ -16,6 +16,7 @@ class ExperienceReplay(object):
         self.count = 0
         self.current = 0
 
+        self.current_state = np.empty((1, self.stack_num) + self.dimensions, dtype=np.uint8)
         self.prestates = np.empty((self.minibatch_size, self.stack_num) + self.dimensions, dtype=np.uint8)
         self.poststates = np.empty((self.minibatch_size, self.stack_num) + self.dimensions, dtype=np.uint8)
 
@@ -28,6 +29,10 @@ class ExperienceReplay(object):
         self.count = max(self.count, self.current + 1)
         self.current = (self.current + 1) % self.maxlen
         return
+
+    def getCurrentState(self):
+        self.current_state[0] = self.getStackedState(self.current - 1)
+        return self.current_state
 
     def getStackedState(self, index):
         index = index % self.count

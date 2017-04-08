@@ -18,15 +18,9 @@ class AtariEnvironment(BaseEnvironment):
         self.recent_observation = None
         self.total_score = 0
         self.num_games = 0
-        self.__reset__()
+        self.reset()
         self.should_render = render
         self.done = False
-
-
-    def getPreviousObservation(self):
-        if self.previous_observation is None:
-            raise AssertionError("self.previous_observation is None.")
-        return self.previous_observation
 
     def getReward(self):
         return self.recent_reward
@@ -40,19 +34,16 @@ class AtariEnvironment(BaseEnvironment):
     def resetStatistics(self):
         self.total_score = 0
         self.num_games = 0
-        self.__reset__()
+        self.reset()
 
     def getStatistics(self):
         return self.total_score, self.num_games
 
     def performAction(self, action):
-        if self.done:
-            self.__reset__()
         self.recent_action = action
         observation, reward, done, _ = self.environment.step(self.recent_action)
         self.done = done
-        self.previous_observation = self.recent_observation
-        self.recent_observation = self.__preprocess_observation__(observation)
+        self.recent_observation = self._preprocess_observation_(observation)
         self.recent_reward = reward
         self.total_score += self.recent_reward
         return True
@@ -66,7 +57,7 @@ class AtariEnvironment(BaseEnvironment):
     def sampleRandomAction(self):
         return self.possible_actions.sample()
 
-    def __preprocess_observation__(self, observation):
+    def _preprocess_observation_(self, observation):
         """This method is to preprocess observation images.
 
         The RGB images from OpenAI are converted CMYK images and the luminance (Y)
@@ -75,7 +66,7 @@ class AtariEnvironment(BaseEnvironment):
         """
         return cv2.resize(cv2.cvtColor(observation, cv2.COLOR_RGB2GRAY), (self.width, self.height))
 
-    def __reset__(self):
-        self.recent_observation = self.__preprocess_observation__(self.environment.reset())
+    def reset(self):
+        self.recent_observation = self._preprocess_observation_(self.environment.reset())
         self.num_games += 1
         self.done = False

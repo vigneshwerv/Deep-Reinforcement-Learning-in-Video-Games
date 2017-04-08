@@ -29,8 +29,6 @@ class DQNAgent(BaseAgent):
         self.normalized_screens = self.screens / 255.0
         self.normalized_next_screens = self.next_screens / 255.0
 
-        self.global_step = tf.Variable(0, trainable=False)
-
         self.copy_ops = []
         self.q_values, self.target_q_values = self._create_network_()
 
@@ -206,25 +204,19 @@ class DQNAgent(BaseAgent):
         return
 
     def predict(self, minibatch):
-        if len(minibatch.shape) == 4:
-            minibatch = np.transpose(minibatch, (0, 2, 3, 1))
-        else:
-            minibatch = np.transpose(minibatch, (1, 2, 0))
-            minibatch = [minibatch]
-        return self.session.run(self.poutput, feed_dict={self.x: minibatch})
+        minibatch = np.transpose(minibatch, (0, 2, 3, 1))
+        return self.session.run(self.target_q_values,
+                                feed_dict={ self.next_screens: minibatch })
 
-    def train_predict(self, minibatch):
-        if len(minibatch.shape) == 4:
-            minibatch = np.transpose(minibatch, (0, 2, 3, 1))
-        else:
-            minibatch = np.transpose(minibatch, (1, 2, 0))
-            minibatch = [minibatch]
-        return self.session.run(self.toutput, feed_dict={self.x: minibatch})
-
-    def train(self, x_values, y_values):
-        x_values = np.transpose(x_values, (0, 2, 3, 1))
-        cost, _ = self.session.run([self.cost, self.train_step], feed_dict={
-                                                self.x: x_values,
-                                                self.y: y_values
-                                               })
+    def train_network(self, prestates, actions, rewards, terminals, poststates):
+        prestates = np.transpose(prestates, (0, 2, 3, 1))
+        poststates = np.transpose(poststates, (0, 2, 3, 1))
+        cost, _ = self.session.run([self.cost, self.train],
+                                   feed_dict={
+                                    self.screens: prestates,
+                                    self.actions: actions,
+                                    self.rewards: rewards,
+                                    self.terminals: terminals,
+                                    self.next_screens: poststates
+                                   })
         return cost

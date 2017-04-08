@@ -44,17 +44,23 @@ class DQNController(object):
         self.current_state.append(self.environment.getObservation())
         # Experience replay
         self.memory_limit = 50000
-        self.experience_replay = ExperienceReplay(self.memory_limit, (84, 84), self.minibatch_size, self.stack_num)
+        self.experience_replay = ExperienceReplay(self.memory_limit,
+                                                  (84, 84),
+                                                  self.minibatch_size,
+                                                  self.stack_num)
         # Maximum no-ops
         self.num_no_op = 0
         self.max_no_op = 30
+        self.steps = 0
 
         self.num_epochs = 30
         self.train_steps_per_epoch = 250000
 
     def __anneal_epsilon__(self):
-        self.epsilon = max(self.epsilon - ((self.epsilon - self.min_epsilon) / self.anneal_till),
-                           self.min_epsilon)
+        if self.steps < self.anneal_till:
+            self.epsilon - self.steps * (self.epsilon - self.min_epsilon) / self.anneal_till
+        else:
+            self.min_epsilon
         return
 
     def __sample_epsilon_action__(self, action):
@@ -64,32 +70,13 @@ class DQNController(object):
         return action
 
     def __supply_action_to_environment__(self, action):
-        cumul_reward = 0
-        for i in xrange(self.repeat_action):
-            cumul_reward *= self.discount
-            self.environment.performAction(action)
-            cumul_reward += self.environment.getReward()
+        self.environment.performAction(action)
         # Add current state, action, reward, consequent state to experience replay
-        self.__add_to_current_state__(self.environment.getObservation())
         self.experience_replay.add((self.environment.getObservation(),
                                     action,
-                                    cumul_reward,
+                                    self.environment.getReward(),
                                     self.environment.isTerminalState()))
         return
-
-    def __compute_loss__(self, minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals):
-        # Call network's gradient descent step
-        max_index = np.argmax(target_q_values, axis=1)
-        pre_q = self.network.train_predict(minibatch_states)
-        terminal = minibatch_terminals.astype(int)
-        for i in xrange(len(minibatch_action)):
-            pre_q[i, minibatch_action[i]] = minibatch_reward[i] + \
-                                            (self.discount * target_q_values[i, max_index[i]]) * terminal[i]
-        return self.network.train(minibatch_states, pre_q)
-
-    def __add_to_current_state__(self, state):
-        self.current_state[:-1] = self.current_state[1:]
-        self.current_state[-1] = state
 
     def __observe__(self):
         observe_start = time.time()
@@ -102,25 +89,16 @@ class DQNController(object):
 
     def run(self):
         """This method will be called from the main() method."""
-
+        # Observe the game by randomly sampling actions from the environment
+        # and performing those actions
+        self.__observe__()
         for i in xrange(self.num_epochs):
             self.environment.resetStatistics()
-            # Initialize initial state by sampling actions randomly and performing
-            # them on the environment
-            self.current_state = np.empty((4, 84, 84), dtype=np.uint8)
-            while len(self.current_state) != self.stack_num:
-                random_action = self.environment.sampleRandomAction()
-                self.environment.performAction(random_action)
-                self.__add_to_current_state__(self.environment.getObservation())
-
-            # Observe the game by randomly sampling actions from the environment
-            # and performing those actions
-            self.__observe__()
             time_now = time.time()
             for j in xrange(self.train_steps_per_epoch):
                 # Use the current state of the emulator and predict an action which gets
                 # added to replay memory (use playing_network)
-                q_values = self.network.predict(self.current_state)
+                q_values = self.network.predict(self.experience_replay.getCurrentState())
                 action_to_perform = np.argmax(q_values, axis=1)[0]
                 # Get action using epsilon-greedy strategy
                 action = self.__sample_epsilon_action__(action_to_perform)
@@ -133,18 +111,18 @@ class DQNController(object):
                     minibatch = self.experience_replay.sample()
                     minibatch_states, minibatch_action, minibatch_reward, minibatch_next_states, \
                             minibatch_terminals = minibatch
-                    target_q_values = self.network.predict(minibatch_next_states)
-                    # COmpute loss
-                    cost = self.__compute_loss__(
-                            minibatch_states, target_q_values, minibatch_action, minibatch_reward, minibatch_terminals)
+                    cost = self.network.train_network(minibatch_states,
+                                                      minibatch_action,
+                                                      minibatch_reward,
+                                                      minibatch_terminals,
+                                                      minibatch_next_states)
                 # Epsilon annealing
                 self.__anneal_epsilon__()
                 # if self.time_step % 1000 == 0:
                 #     print "Cost at iteration", self.time_step, " is", cost
                 #     print "Value of epsilon is", self.epsilon
+                self.steps += 1
                 if j % self.copy_steps == 0:
-                    logger.info("Copying network weights. Elapsed time since start=%.2f",
-                            (time.time() - time_now))
                     self.network.copy_weights(i, j)
             total_score, num_games = self.environment.getStatistics()
             time_taken = (time.time() - time_now)

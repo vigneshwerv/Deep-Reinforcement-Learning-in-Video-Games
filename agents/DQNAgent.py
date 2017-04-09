@@ -32,6 +32,10 @@ class DQNAgent(BaseAgent):
         self.copy_ops = []
         self.q_values, self.target_q_values = self._create_network_()
 
+        with tf.name_scope('summaries'):
+            avg_qvalue = tf.reduce_mean(self.q_values)
+            self.qvalue_summary = tf.summary.scalar('avg_qvalue', avg_qvalue)
+
         self.cost = self._create_error_gradient_ops_()
         self.train = self._create_optimizer_op_()
 
@@ -118,8 +122,8 @@ class DQNAgent(BaseAgent):
                                    trainable=False,
                                    name=('target_' + name + '_biases'))
 
-            self.copy_ops.append(tf.assign(target_w, w))
-            self.copy_ops.append(tf.assign(target_b, b))
+            self.copy_ops.append(target_w.assign(w))
+            self.copy_ops.append(target_b.assign(b))
 
             policy_conv = tf.nn.relu(tf.nn.conv2d(policy_input_tensor, w, stride, padding='VALID') + b)
             target_conv = tf.nn.relu(tf.nn.conv2d(target_input_tensor,
@@ -143,8 +147,8 @@ class DQNAgent(BaseAgent):
                                    trainable=False,
                                    name=('target_' + name + '_biases'))
 
-            self.copy_ops.append(tf.assign(target_w, w))
-            self.copy_ops.append(tf.assign(target_b, b))
+            self.copy_ops.append(target_w.assign(w))
+            self.copy_ops.append(target_b.assign(b))
 
             policy_out = tf.nn.relu(tf.matmul(policy_input_tensor, w) + b)
             target_out = tf.nn.relu(tf.matmul(target_input_tensor, target_w) + target_b)
@@ -166,8 +170,8 @@ class DQNAgent(BaseAgent):
                                    trainable=False,
                                    name=('target_' + name + '_biases'))
 
-            self.copy_ops.append(tf.assign(target_w, w))
-            self.copy_ops.append(tf.assign(target_b, b))
+            self.copy_ops.append(target_w.assign(w))
+            self.copy_ops.append(target_b.assign(b))
 
             policy_out = tf.matmul(policy_input_tensor, w) + b
             target_out = tf.matmul(target_input_tensor, target_w) + target_b
@@ -210,6 +214,12 @@ class DQNAgent(BaseAgent):
         minibatch = np.transpose(minibatch, (0, 2, 3, 1))
         return self.session.run(self.q_values,
                                 feed_dict={ self.screens: minibatch })
+
+    def record_average_qvalue(self, minibatch, step):
+        minibatch = np.transpose(minibatch, (0, 2, 3, 1))
+        qvalue_summary = self.session.run(self.qvalue_summary,
+                                    feed_dict={ self.screens: minibatch })
+        self.train_write.add_summary(qvalue_summary, step)
 
     def train_network(self, prestates, actions, rewards, terminals, poststates):
         prestates = np.transpose(prestates, (0, 2, 3, 1))

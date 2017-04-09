@@ -60,7 +60,7 @@ class DQNAgent(BaseAgent):
 
     def _create_error_gradient_ops_(self):
         # Get the Q-value for the action taken
-        one_hot_actions = tf.one_hot(self.actions, self.num_actions)
+        one_hot_actions = tf.stop_gradient(tf.one_hot(self.actions, self.num_actions))
         predicted_q_values = tf.reduce_sum(
                                 tf.multiply(
                                     self.q_values, one_hot_actions),
@@ -104,7 +104,10 @@ class DQNAgent(BaseAgent):
                             stride,
                             name='conv'):
         stride = [1, stride[0], stride[1], 1]
-        filter_size = [filter_size[0], filter_size[1], policy_input_tensor.get_shape().as_list()[-1], output_dimension]
+        filter_size = [filter_size[0],
+                       filter_size[1],
+                       policy_input_tensor.get_shape().as_list()[-1],
+                       output_dimension]
         with tf.variable_scope(name):
             w = self._get_weights_(filter_size, ('policy_' + name))
             b = self._get_biases_(filter_size, ('policy_' + name))
@@ -205,8 +208,8 @@ class DQNAgent(BaseAgent):
 
     def predict(self, minibatch):
         minibatch = np.transpose(minibatch, (0, 2, 3, 1))
-        return self.session.run(self.target_q_values,
-                                feed_dict={ self.next_screens: minibatch })
+        return self.session.run(self.q_values,
+                                feed_dict={ self.screens: minibatch })
 
     def train_network(self, prestates, actions, rewards, terminals, poststates):
         prestates = np.transpose(prestates, (0, 2, 3, 1))

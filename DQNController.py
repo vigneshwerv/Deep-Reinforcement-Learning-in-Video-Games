@@ -26,9 +26,10 @@ class DQNController(object):
         # Lower than this, epsilon is kept constant
         self.min_epsilon = 0.1
         # Epsilon's starting value
+        self.max_epsilon = 1.0
         self.epsilon = 1.0
         # Number of steps to anneal epsilon
-        self.anneal_till = 100000
+        self.anneal_till = 1000000
         # Discount factor
         self.discount = 0.99
         # Variable that holds the current Environment
@@ -58,16 +59,16 @@ class DQNController(object):
         self.train_steps_per_epoch = 250000
 
     def __anneal_epsilon__(self):
-        if self.steps < self.anneal_till:
-            self.epsilon - self.steps * (self.epsilon - self.min_epsilon) / self.anneal_till
-        else:
-            self.min_epsilon
+        self.epsilon = max(self.epsilon
+                            - ((self.max_epsilon - self.min_epsilon)
+                                / self.anneal_till),
+                            self.min_epsilon)
         return
 
     def __sample_epsilon_action__(self):
+        action = None
         if random.random() < self.epsilon:
-            sampled_action = self.environment.sampleRandomAction()
-            action = sampled_action
+            action = self.environment.sampleRandomAction()
         else:
             # Use the current state of the emulator and predict an action which gets
             # added to replay memory (use playing_network)
@@ -93,6 +94,13 @@ class DQNController(object):
         logger.info('Finished observation. Steps=%d; Time taken=%.2f',
                 self.observation_time_steps, observe_duration)
 
+    def isGameOver(self):
+        if self.environment.isTerminalState():
+            self.environment.reset()
+            for _ in xrange(self.stack_num):
+                action = self.environment.sampleRandomAction()
+                self.__supply_action_to_environment__(action)
+
     def run(self):
         """This method will be called from the main() method."""
         # Observe the game by randomly sampling actions from the environment
@@ -107,6 +115,9 @@ class DQNController(object):
                 # Perform action based on epsilon-greedy search and store the transitions
                 # in experience replay
                 self.__supply_action_to_environment__(action)
+                # If the environment is in the terminal state, reset the environment, and
+                # perform self.stack_num actions to reset the environment
+                self.isGameOver()
                 if j % self.train_frequency == 0:
                     # print "Started training"
                     # Sample minibatch of size self.minibatch_size from experience replay
@@ -119,9 +130,12 @@ class DQNController(object):
                                                       minibatch_terminals,
                                                       minibatch_next_states)
                 if j % self.record_frequency == 0:
+                    total_score, num_games = self.environment.getStatistics()
+                    avg_score = total_score / num_games
                     self.network.record_average_qvalue(
                             self.experience_replay.getCurrentState(),
-                            i * self.train_steps_per_epoch + j)
+                            i * self.train_steps_per_epoch + j,
+                            self.epsilon, avg_score)
                 # Epsilon annealing
                 self.__anneal_epsilon__()
                 # if self.time_step % 1000 == 0:
@@ -129,10 +143,10 @@ class DQNController(object):
                 #     print "Value of epsilon is", self.epsilon
                 self.steps += 1
                 if j % self.copy_steps == 0:
-                    self.network.copy_weights(i, j)
+                    self.network.copy_weights()
             total_score, num_games = self.environment.getStatistics()
             time_taken = (time.time() - time_now)
             logger.info("Finished epoch %d: Steps=%d; Time taken=%.2f",
                     i, j, time_taken)
-            logger.info("Number of games: %d; Average reward: %.2f", num_games, (total_score / num_games))
-            logger.info("Final epsilon value for epoch: %f", self.epsilon)
+            logger.info("\tNumber of games: %d; Average reward: %.2f", num_games, (total_score / num_games))
+            logger.info("\tFinal epsilon value for epoch: %f", self.epsilon)

@@ -26,6 +26,9 @@ class DQNAgent(BaseAgent):
         self.terminals = tf.placeholder(tf.bool, shape=[None])
         self.next_screens = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
 
+        self.epsilon = tf.placeholder(tf.float32, shape=())
+        self.avgscore = tf.placeholder(tf.float32, shape=())
+
         self.normalized_screens = self.screens / 255.0
         self.normalized_next_screens = self.next_screens / 255.0
 
@@ -35,6 +38,8 @@ class DQNAgent(BaseAgent):
         with tf.name_scope('summaries'):
             avg_qvalue = tf.reduce_mean(self.q_values)
             self.qvalue_summary = tf.summary.scalar('avg_qvalue', avg_qvalue)
+            self.epsilon_summary = tf.summary.scalar('epsilon', self.epsilon)
+            self.avgscore_summary = tf.summary.scalar('avg_score', self.avgscore)
 
         self.cost = self._create_error_gradient_ops_()
         self.train = self._create_optimizer_op_()
@@ -74,16 +79,16 @@ class DQNAgent(BaseAgent):
         discount_factor = tf.constant(self.discount_factor)
         discount_q_values = tf.multiply(discount_factor, target_q_values)
         terminal_q_removed = tf.multiply(
-                                tf.cast(self.terminals, tf.float32),
+                                (1.0 - tf.cast(self.terminals, tf.float32)),
                                 discount_q_values)
         target_value = tf.stop_gradient(self.rewards + terminal_q_removed)
         # Calculate difference
         difference = tf.abs(predicted_q_values - target_value)
 
         if self.error_clip >= 0:
-            quadratic_part = tf.clip_by_value(difference, 0.0, self.error_clip)
-            linear_part = difference - quadratic_part
-            errors = (0.5 * tf.square(quadratic_part)) + (self.error_clip * linear_part)
+            clipped_errors = tf.clip_by_value(difference, 0.0, self.error_clip)
+            linear_part = difference - clipped_errors
+            errors = (0.5 * tf.square(clipped_errors)) + (self.error_clip * linear_part)
         else:
             errors = (0.5 * tf.square(difference))
 
@@ -206,7 +211,7 @@ class DQNAgent(BaseAgent):
                         self.num_actions, name='linear')
         return policy_out, target_out
 
-    def copy_weights(self, i, j):
+    def copy_weights(self):
         self.session.run(self.copy_ops)
         return
 
@@ -215,11 +220,20 @@ class DQNAgent(BaseAgent):
         return self.session.run(self.q_values,
                                 feed_dict={ self.screens: minibatch })
 
-    def record_average_qvalue(self, minibatch, step):
+    def record_average_qvalue(self, minibatch, step, epsilon, avgscore):
         minibatch = np.transpose(minibatch, (0, 2, 3, 1))
-        qvalue_summary = self.session.run(self.qvalue_summary,
-                                    feed_dict={ self.screens: minibatch })
+        qvalue_summary, epsilon_summary, avgscore_summary  =\
+                self.session.run([self.qvalue_summary,
+                                  self.epsilon_summary,
+                                  self.avgscore_summary],
+                                  feed_dict={
+                                      self.screens: minibatch,
+                                      self.epsilon: epsilon,
+                                      self.avgscore: avgscore
+                                  })
         self.train_write.add_summary(qvalue_summary, step)
+        self.train_write.add_summary(epsilon_summary, step)
+        self.train_write.add_summary(avgscore_summary, step)
 
     def train_network(self, prestates, actions, rewards, terminals, poststates):
         prestates = np.transpose(prestates, (0, 2, 3, 1))

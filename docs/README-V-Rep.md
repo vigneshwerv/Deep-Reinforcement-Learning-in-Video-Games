@@ -16,13 +16,13 @@ My previous explanation was a little obscure so let me try to explain it again. 
 
 This is with respect to the Deep Q Learning network.
 
-** Old formulation **
+**Old formulation**
 * Features - This will be defined by the image that we get from the camera on the quadcopter.
 * Actions - Still to find how it is, but the idea is they create controlled motion in x and y plain.
 * Goal - Either a GPS location from the starting point, in some reference behind the obstacle or away from the obstacle.
 * Reward - This would be used for Q Learning. If we get precise geo locations then it could be logistic function over the euclidean distance between the points. If we only get degrees of movement for joints or something then we would need to think of how to get the distance from the goal state. If we go by strict images from the quadcoptor then we can preprocess this images and when there are no edges in the image that can be our goal state. And we can set up the reward based on the pixels that have a gradient (will explain this if not directly understandable).
 
-** New formulation **
+**New formulation**
 * Features - This can still be the camera image but I dont think it matters that much. A better feature is the orientation of the quadcopter which can be received by simGetObjectOrientation, this gives 3 values which are the alpha, beta and gamma (mostly x, y and z) orientation of the object. Giving these 12 numbers we would be able to learn the thrust of motors and orientation for the quadcopter.
 * Actions - It is the thrust or the speed of with which the motors are running. We will have to set the amplitude on our own and multiply it between 0 and 1. This value will be learned from the network.
 * Goal - GPS location of the object can be received, only problem here is that it keeps moving on the .
@@ -30,11 +30,11 @@ This is with respect to the Deep Q Learning network.
 
 ### V-Rep API ###
 
-* simxGetObjectHandle
-* simxGetVisionSensorImage
-* simxSetJointTargetVelocity
+* simxGetObjectHandle - this gives the id of the objects in the vrep. This handle with the client ID (running the simulation) is used to handle the objects.
+* simxGetVisionSensorImage - Gets the image as a list and unsigned char between -128 to 127. Simple command can convert it to image.
+* simxSetJointTargetVelocity - this will not be used
 * simxPauseSimulation
 * simxPauseCommunication
 * simxStartSimulation
 * simxStopSimulation
-* simxGetObjectOrientation
+* simxGetObjectOrientation - gives three values for orientation of the object.

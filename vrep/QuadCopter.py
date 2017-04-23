@@ -15,19 +15,19 @@ class QuadCopter(BaseRobot):
 	def __getHandles(self):
 		# get object handle
 		self.robot = self.util.getHandle(self.names['robot']);
-		self.propellers = [];
+		self.propellers = [0] * 4;
 		for i in range(0, 4):
-			self.propellers[i] = self.util.getHandle(self.names['properllers'] + str(i+1));
+			self.propellers[i] = self.util.getHandle(self.names['propeller'] + str(i+1));
 
 
 	def getLocation(self, obj):
-		return util.getLocation(obj);
+		return self.util.getLocation(obj);
 
 	def getOrientation(self, obj):
-		return util.getOrientation(obj);
+		return self.util.getOrientation(obj);
 	
 	def getVelocity(self, obj):
-		return util.getVelocity(obj);
+		return self.util.getVelocity(obj);
 '''
 	def setThrustValues(self, obj, paramName, paramValue):
 		util.setParameter(obj, paramName, paramValue);

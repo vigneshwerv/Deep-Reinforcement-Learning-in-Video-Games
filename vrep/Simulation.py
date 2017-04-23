@@ -23,7 +23,6 @@ class Simulation(object):
 		self.beta = -10; #how much effect should distance have
 		self.maxTime = 2;
 		## create a thread and a function
-		self.quadcopter = QuadCopter();
 
 
 	def __calculateReward(self, position, orientation):
@@ -76,7 +75,7 @@ class Simulation(object):
 		return True;
 	
 	def __getDistanceFromGoal(self, position):
-		return math.sqrt(sum([(self.position[i] - self.goal[i])^2 for i in range(0, len(self.goal))]));
+		return math.sqrt(sum([(position[i] - self.goal[i])**2 for i in range(0, len(self.goal))]));
 
 	def __stop(self):
 		vrep.simxStopSimulation(self.vc.clientID, vrep.simx_opmode_blocking);
@@ -87,17 +86,17 @@ class Simulation(object):
 
 	def __getRobotData(self):
 		''' gets the position and orientation of the robot '''
-		self.currentPosition = self.quadcopter.getLocation();
-		self.currentOrientaiton = self.quadcopter.getOrientation();
+		self.currentPosition = self.quadcopter.getLocation(self.quadcopter.robot);
+		self.currentOrientation = self.quadcopter.getOrientation(self.quadcopter.robot);
 
 
 	def run(self):
 		actionSpace = len(self.actions)
 		self.__start();
 		self.__getRobotData();
-		while not self.__checkEndLife(self, self.currentPosition, self.currentOrientation):
-			self.__calculateReward(self, self.currentPosition, self.currentOrientation);
+		while not self.__checkEndLife(self.currentPosition, self.currentOrientation):
+			self.__calculateReward(self.currentPosition, self.currentOrientation);
 			for i in range(0, 4):
 				action[i] = self.actions[randrange(actionSpace)]
-			self.__calculateThrust(self, action);
+			self.__calculateThrust(action);
 		self.__stop();

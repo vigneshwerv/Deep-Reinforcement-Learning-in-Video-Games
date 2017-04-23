@@ -1,0 +1,3 @@
+portIndex1_port                 = 19997
+portIndex1_debug                = true
+portIndex1_syncSimTrigger       = true		

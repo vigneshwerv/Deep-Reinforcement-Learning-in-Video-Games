@@ -32,5 +32,7 @@ class Util(object):
             return velocity;
         else:
             raise Exception('could not retrieve velocity for ', obj);
-
-    def setParameter(self, obj, parameter)
+'''
+    def setParameter(self, obj, paramName, paramValue):
+		vrep
+'''

@@ -18,10 +18,11 @@ class Simulation(object):
 		self.maxThrust = 7;
 		self.maxDistance = 2; # used to define whether robot has stirred away too much from the goal
 		self.epsilon = 0.0001; # if the quad copter is this much away from each axis then the goal has been reached
-		self.dt = 0.05; # 50 ms is the smallest time frame set in vrep
-		self.maxOrientation = 15.0;
+		self.dt = 0.01; # 50 ms is the smallest time frame set in vrep
+		self.maxOrientation = 45.0;
 		self.beta = -10; #how much effect should distance have
-		self.maxTime = 2;
+		self.maxTime = 4;
+                self.count = 0;
 		## create a thread and a function
 
 
@@ -50,19 +51,25 @@ class Simulation(object):
 	def __checkEndLife(self, position, orientation):
 		# if the robot has drifted away by a set max distance from the goal
 		# then we need to assume it as an end life scenario.
+                print position
 		distance = self.__getDistanceFromGoal(position);
+                print distance
 		if distance > self.maxDistance:
-			return True;
+                    print "Distance is too much"
+                    return True;
 
 		# check orientation
 		''' if any value of alpha beta gamma is greater than 15 degree then it is the end '''
 		for i in range(0, len(orientation)):
 			if abs(orientation[i]) > self.maxOrientation:
-				return True;
+                            print "Orientation is messed up"
+                            return True;
 
 		## check time
 		if self.count > self.maxTime:
-			return True;
+                    print "Out of time"
+                    return True;
+                self.count += self.dt;
 
 		return False;
 
@@ -82,7 +89,7 @@ class Simulation(object):
 
 	def __start(self):
 		self.startTime = time.time();
-		vrep.simxStartSimulation(self.vc.clientID, vrep.simx_opmode_oneshot);
+		vrep.simxStartSimulation(self.vc.clientID, vrep.simx_opmode_blocking);
 
 	def __getRobotData(self):
 		''' gets the position and orientation of the robot '''
@@ -94,9 +101,11 @@ class Simulation(object):
 		actionSpace = len(self.actions)
 		self.__start();
 		self.__getRobotData();
+                action = [0]*4;
 		while not self.__checkEndLife(self.currentPosition, self.currentOrientation):
 			self.__calculateReward(self.currentPosition, self.currentOrientation);
 			for i in range(0, 4):
 				action[i] = self.actions[randrange(actionSpace)]
 			self.__calculateThrust(action);
+                        self.__getRobotData();
 		self.__stop();

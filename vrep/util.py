@@ -4,7 +4,7 @@ class Util(object):
     def __init__(self, clientID):
         self.clientID = clientID;
 
-    def getHandle(self, obj, opmode=vrep.simx_opmode_oneshot):
+    def getHandle(self, obj, opmode=vrep.simx_opmode_blocking):
         _, handle = vrep.simxGetObjectHandle(self.clientID, obj, opmode);
         print _, handle;
         if _ < 2:

@@ -7,7 +7,7 @@ class QuadCopter(BaseRobot):
 	def __init__(self, clientID):
 		self.clientID = clientID;
 		self.names = {};
-		self.names['robot'] = 'Quadricopter';
+		self.names['robot'] = 'Quadricopter_base';
 		self.names['propeller'] = 'Quadricopter_propeller';
 		self.util = Util(self.clientID);
 		self.__getHandles();

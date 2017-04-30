@@ -1,12 +1,17 @@
 from BaseAgent import BaseAgent
 
+import logging
 import math
 import numpy as np
+import os
 import tensorflow as tf
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class DQNAgent(BaseAgent):
 
-    def __init__(self, num_actions, discount_factor):
+    def __init__(self, num_actions, discount_factor, args):
 
         self.learning_rate = 0.00025
         self.gradient_momentum = 0.95
@@ -37,6 +42,8 @@ class DQNAgent(BaseAgent):
         self.copy_ops = []
         self.q_values, self.target_q_values = self._create_network_()
 
+        self.name = args.name
+
         with tf.name_scope('summaries'):
             avg_qvalue = tf.reduce_mean(self.q_values)
             self.qvalue_summary = tf.summary.scalar('avg_qvalue', avg_qvalue)
@@ -46,12 +53,31 @@ class DQNAgent(BaseAgent):
         self.cost = self._create_error_gradient_ops_()
         self.train = self._create_optimizer_op_()
 
-        initialize_variables = tf.global_variables_initializer()
-
         self.merged = tf.summary.merge_all()
-        self.train_write = tf.summary.FileWriter('log/train', self.session.graph)
+        self.train_write = tf.summary.FileWriter(os.path.join('log',
+                                                              self.name,
+                                                              'train'),
+                                                 self.session.graph)
 
-        self.session.run(initialize_variables)
+        self.saver = tf.train.Saver()
+
+        self.save_directory = self._create_dir_path_()
+        self.checkpoint_path = self._create_checkpoint_path_()
+        if os.path.isdir(self.save_directory):
+            self.saver.restore(self.session, self.checkpoint_path)
+            logger.info('Restored ' + self.name + ' from checkpoint.')
+        else:
+            initialize_variables = tf.global_variables_initializer()
+            self.session.run(initialize_variables)
+            os.makedirs(self.save_directory)
+            self.create_checkpoint()
+            logger.info('Created initial model checkpoint for agent ' + self.name)
+
+    def _create_dir_path_(self):
+        return os.path.join('ckpt', self.name)
+
+    def _create_checkpoint_path_(self):
+        return os.path.join(self._create_dir_path_(), self.name + '.ckpt')
 
     def _create_optimizer_op_(self):
         with tf.name_scope('optimizer'):
@@ -220,6 +246,9 @@ class DQNAgent(BaseAgent):
         minibatch = np.transpose(minibatch, (0, 2, 3, 1))
         return self.session.run(self.q_values,
                                 feed_dict={ self.screens: minibatch })
+
+    def create_checkpoint(self):
+        self.saver.save(self.session, self.checkpoint_path)
 
     def record_average_qvalue(self, minibatch, step, epsilon, avgscore):
         minibatch = np.transpose(minibatch, (0, 2, 3, 1))

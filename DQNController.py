@@ -14,6 +14,7 @@ logger.setLevel(logging.INFO)
 class DQNController(object):
 
     def __init__(self, **kwargs):
+        args = kwargs.get('args')
         # Number of steps of training before training network's weights are
         # copied to target network (C)
         self.copy_steps = 10000
@@ -33,12 +34,12 @@ class DQNController(object):
         # Discount factor
         self.discount = 0.99
         # Variable that holds the current Environment
-        self.environment = AtariEnvironment()
+        self.environment = AtariEnvironment(args=args)
         self.action_space = self.environment.getPossibleActions()
         # For how long should the network observe before playing?
         self.observation_time_steps = 50000
         # The network
-        self.network = DQNAgent(self.action_space, self.discount)
+        self.network = DQNAgent(self.action_space, self.discount, args)
         self.train_frequency = 4
         self.record_frequency = 10000
         # The current state of the environment (stacked)
@@ -57,6 +58,8 @@ class DQNController(object):
 
         self.num_epochs = 120
         self.train_steps_per_epoch = 250000
+        self.num_test_epochs = 10
+        self.test_steps_per_epoch = 1000
 
     def __anneal_epsilon__(self):
         self.epsilon = max(self.epsilon
@@ -150,3 +153,15 @@ class DQNController(object):
                     i, j, time_taken)
             logger.info("\tNumber of games: %d; Average reward: %.2f", num_games, (total_score / num_games))
             logger.info("\tFinal epsilon value for epoch: %f", self.epsilon)
+            self.network.create_checkpoint()
+
+    def run_testing_stage(self):
+        for i in xrange(self.num_test_epochs):
+            self.environment.resetStatistics()
+            for _ in xrange(self.stack_num):
+                action = self.environment.sampleRandomAction()
+                self.__supply_action_to_environment__(action)
+            for j in xrange(self.test_steps_per_epoch):
+                q_values = self.network.predict(self.experience_replay.getCurrentState())
+                action = np.argmax(q_values, axis=1)[0]
+                self.environment.performAction(action)

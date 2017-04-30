@@ -20,7 +20,7 @@ class Simulation(object):
 		self.epsilon = 0.0001; # if the quad copter is this much away from each axis then the goal has been reached
 		self.dt = 0.01; # 50 ms is the smallest time frame set in vrep
 		self.maxOrientation = 45.0;
-		self.beta = -10; #how much effect should distance have
+		self.beta = -1; #how much effect should distance have
 		self.maxTime = 4;
                 self.count = 0;
 		## create a thread and a function
@@ -44,7 +44,7 @@ class Simulation(object):
 
 	def __calculateThrust(self, actions):
 		thrust = [action * self.maxThrust for action in actions]
-		print '** thurst values - ', thrust;
+		print '** Thrust values - ', thrust;
 		return thrust;
 
 
@@ -69,7 +69,6 @@ class Simulation(object):
 		if self.count > self.maxTime:
                     print "Out of time"
                     return True;
-                self.count += self.dt;
 
 		return False;
 
@@ -89,6 +88,7 @@ class Simulation(object):
 
 	def __start(self):
 		self.startTime = time.time();
+                self.count = 0;
 		vrep.simxStartSimulation(self.vc.clientID, vrep.simx_opmode_blocking);
 
 	def __getRobotData(self):
@@ -99,13 +99,16 @@ class Simulation(object):
 
 	def run(self):
 		actionSpace = len(self.actions)
-		self.__start();
-		self.__getRobotData();
-                action = [0]*4;
-		while not self.__checkEndLife(self.currentPosition, self.currentOrientation):
-			self.__calculateReward(self.currentPosition, self.currentOrientation);
-			for i in range(0, 4):
-				action[i] = self.actions[randrange(actionSpace)]
-			self.__calculateThrust(action);
-                        self.__getRobotData();
-		self.__stop();
+                while True:
+                    self.__start();
+                    self.__getRobotData();
+                    action = [0]*4;
+                    while not self.__checkEndLife(self.currentPosition, self.currentOrientation):
+                            self.__calculateReward(self.currentPosition, self.currentOrientation);
+                            for i in range(0, 4):
+                                    action[i] = self.actions[randrange(actionSpace)]
+                            self.__calculateThrust(action);
+                            self.__getRobotData();
+                            self.count += self.dt;
+                    self.__stop();
+                    time.sleep(5)

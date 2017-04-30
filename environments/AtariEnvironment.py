@@ -9,6 +9,7 @@ class AtariEnvironment(BaseEnvironment):
 
     def __init__(self, render=False, **kwargs):
         self.environment = gym.make('Pong-v0')
+        args = kwargs.get('args')
         self.width = 84
         self.height = 84
         self.possible_actions = self.environment.action_space
@@ -18,9 +19,9 @@ class AtariEnvironment(BaseEnvironment):
         self.recent_observation = None
         self.total_score = 0
         self.num_games = 0
-        self.reset()
-        self.should_render = render
+        self.should_render = args.test
         self.done = False
+        self.reset()
 
     def getReward(self):
         return self.recent_reward
@@ -46,6 +47,8 @@ class AtariEnvironment(BaseEnvironment):
         self.recent_observation = self._preprocess_observation_(observation)
         self.recent_reward = reward
         self.total_score += self.recent_reward
+        if self.should_render:
+            self.environment.render()
         return True
 
     def isTerminalState(self):
@@ -70,3 +73,5 @@ class AtariEnvironment(BaseEnvironment):
         self.recent_observation = self._preprocess_observation_(self.environment.reset())
         self.num_games += 1
         self.done = False
+        if self.should_render:
+            self.environment.render()

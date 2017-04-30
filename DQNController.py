@@ -55,7 +55,7 @@ class DQNController(object):
         self.max_no_op = 30
         self.steps = 0
 
-        self.num_epochs = 30
+        self.num_epochs = 120
         self.train_steps_per_epoch = 250000
 
     def __anneal_epsilon__(self):

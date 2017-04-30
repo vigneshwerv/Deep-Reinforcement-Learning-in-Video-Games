@@ -16,9 +16,11 @@ class DQNAgent(BaseAgent):
         self.discount_factor = discount_factor
 
         self.error_clip = 1.0
-        self.gradient_clip = 10
+        self.gradient_clip = 0
 
-        self.session = tf.Session()
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        self.session = tf.Session(config=config)
 
         self.screens = tf.placeholder(tf.float32, shape=[None, 84, 84, 4])
         self.actions = tf.placeholder(tf.int32, shape=[None])
@@ -56,7 +58,6 @@ class DQNAgent(BaseAgent):
             optimizer = tf.train.RMSPropOptimizer(
                             self.learning_rate,
                             decay=self.gradient_momentum,
-                            momentum=0.0,
                             epsilon=self.min_sq_gradient)
 
             grads_and_vars = optimizer.compute_gradients(self.cost)
@@ -86,7 +87,7 @@ class DQNAgent(BaseAgent):
         difference = tf.abs(predicted_q_values - target_value)
 
         if self.error_clip >= 0:
-            clipped_errors = tf.clip_by_value(difference, 0.0, self.error_clip)
+            clipped_errors = tf.clip_by_value(difference, -self.error_clip, self.error_clip)
             linear_part = difference - clipped_errors
             errors = (0.5 * tf.square(clipped_errors)) + (self.error_clip * linear_part)
         else:
